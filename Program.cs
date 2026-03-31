@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using WebApplication3.Models;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,7 +22,8 @@ builder.Services.AddCors(options =>
 });
 
 // 2. JWT Authentication using Supabase JWKS endpoint
-var supabaseUrl = builder.Configuration["Supabase__Url"]
+var supabaseUrl = Environment.GetEnvironmentVariable("Supabase__Url")
+    ?? builder.Configuration["Supabase__Url"]
     ?? builder.Configuration["Supabase:Url"];
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -56,48 +58,53 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
-// 3. Database — use PostgreSQL on Railway, SQLite locally
-var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Data Source=todo.db";
+// 3. Database configuration
+var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-Console.WriteLine($"Connection string starts with: {connectionString.Substring(0, Math.Min(20, connectionString.Length))}");
-
-if (connectionString.StartsWith("postgresql://") || connectionString.StartsWith("postgres://"))
+if (!string.IsNullOrEmpty(databaseUrl))
 {
-    // Convert Railway's postgres:// URL format to Npgsql format
-    connectionString = connectionString
-        .Replace("postgresql://", "")
-        .Replace("postgres://", "");
-
-    var userInfo = connectionString.Split('@')[0];
-    var hostInfo = connectionString.Split('@')[1];
-    var user = userInfo.Split(':')[0];
-    var password = userInfo.Split(':')[1];
-    var host = hostInfo.Split('/')[0].Split(':')[0];
-    var port = hostInfo.Split('/')[0].Contains(':') ? hostInfo.Split('/')[0].Split(':')[1] : "5432";
-    var database = hostInfo.Split('/')[1].Split('?')[0];
-
-    connectionString = $"Host={host};Port={port};Database={database};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true";
-    Console.WriteLine("Using PostgreSQL");
+    Console.WriteLine("Using PostgreSQL from DATABASE_URL");
     
+    // Use NpgsqlConnectionStringBuilder to parse the URL
+    var uri = new Uri(databaseUrl);
+    var userInfo = uri.UserInfo.Split(':');
+    
+    var npgsqlBuilder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        Username = userInfo[0],
+        Password = userInfo.Length > 1 ? userInfo[1] : "",
+        SslMode = SslMode.Require,
+        TrustServerCertificate = true
+    };
+
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseNpgsql(connectionString));
+        options.UseNpgsql(npgsqlBuilder.ConnectionString));
 }
 else
 {
-    Console.WriteLine("Using SQLite");
+    Console.WriteLine("Using SQLite (local)");
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseSqlite(connectionString));
+        options.UseSqlite("Data Source=todo.db"));
 }
 
 var app = builder.Build();
 
-// Auto-run migrations on startup
+// Auto-create tables on startup
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.EnsureCreated();
+        Console.WriteLine("Database ready!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Database error: {ex.Message}");
+    }
 }
 
 app.UseStaticFiles();
