@@ -5,7 +5,7 @@ using WebApplication3.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. CORS - explicitly allow Vercel frontend
+// 1. CORS
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -21,7 +21,8 @@ builder.Services.AddCors(options =>
 });
 
 // 2. JWT Authentication using Supabase JWKS endpoint
-var supabaseUrl = builder.Configuration["Supabase:Url"];
+var supabaseUrl = builder.Configuration["Supabase__Url"]
+    ?? builder.Configuration["Supabase:Url"];
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -55,17 +56,37 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
-// 3. Use PostgreSQL on Railway, SQLite locally
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+// 3. Database — use PostgreSQL on Railway, SQLite locally
+var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=todo.db";
 
-if (connectionString.StartsWith("postgresql") || connectionString.StartsWith("postgres"))
+Console.WriteLine($"Connection string starts with: {connectionString.Substring(0, Math.Min(20, connectionString.Length))}");
+
+if (connectionString.StartsWith("postgresql://") || connectionString.StartsWith("postgres://"))
 {
+    // Convert Railway's postgres:// URL format to Npgsql format
+    connectionString = connectionString
+        .Replace("postgresql://", "")
+        .Replace("postgres://", "");
+
+    var userInfo = connectionString.Split('@')[0];
+    var hostInfo = connectionString.Split('@')[1];
+    var user = userInfo.Split(':')[0];
+    var password = userInfo.Split(':')[1];
+    var host = hostInfo.Split('/')[0].Split(':')[0];
+    var port = hostInfo.Split('/')[0].Contains(':') ? hostInfo.Split('/')[0].Split(':')[1] : "5432";
+    var database = hostInfo.Split('/')[1].Split('?')[0];
+
+    connectionString = $"Host={host};Port={port};Database={database};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+    Console.WriteLine("Using PostgreSQL");
+    
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseNpgsql(connectionString));
 }
 else
 {
+    Console.WriteLine("Using SQLite");
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseSqlite(connectionString));
 }
@@ -76,7 +97,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    db.Database.EnsureCreated();
 }
 
 app.UseStaticFiles();
