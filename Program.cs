@@ -6,7 +6,7 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. CORS - must be registered first
+// 1. CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -37,7 +37,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(60)
         };
-
         options.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = context =>
@@ -97,12 +96,18 @@ else
 
 var app = builder.Build();
 
-// Auto-create tables
+// Auto-create/reset tables on startup
 using (var scope = app.Services.CreateScope())
 {
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var resetDb = Environment.GetEnvironmentVariable("RESET_DB") == "true";
+        if (resetDb)
+        {
+            Console.WriteLine("Resetting database...");
+            db.Database.EnsureDeleted();
+        }
         db.Database.EnsureCreated();
         Console.WriteLine("Database ready!");
     }
@@ -114,10 +119,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseStaticFiles();
 app.UseRouting();
-
-// CORS must come before Authentication
 app.UseCors("AllowAll");
-
 app.UseAuthentication();
 app.UseAuthorization();
 
