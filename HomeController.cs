@@ -6,78 +6,100 @@ using WebApplication3.Models;
 
 namespace WebApplication3.Controllers
 {
-	[Authorize]
-	[ApiController]
-	[Route("api/[controller]")]
-	public class HomeController : ControllerBase
-	{
-		private readonly AppDbContext _context;
+    [Authorize]
+    [ApiController]
+    [Route("api/[controller]")]
+    public class HomeController : ControllerBase
+    {
+        private readonly AppDbContext _context;
 
-		public HomeController(AppDbContext context)
-		{
-			_context = context;
-		}
+        public HomeController(AppDbContext context)
+        {
+            _context = context;
+        }
 
-		// Supabase puts the user ID in the "sub" claim
-		private string GetUserId()
-		{
-			return User.FindFirstValue("sub")
-				?? User.FindFirstValue(ClaimTypes.NameIdentifier)
-				?? string.Empty;
-		}
+        private string GetUserId()
+        {
+            return User.FindFirstValue("sub")
+                ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? string.Empty;
+        }
 
-		[HttpGet]
-		public async Task<IActionResult> GetItems()
-		{
-			var userId = GetUserId();
-			Console.WriteLine($"GET tasks for user: {userId}");
+        // READ
+        [HttpGet]
+        public async Task<IActionResult> GetItems()
+        {
+            var userId = GetUserId();
+            var items = await _context.TodoItems
+                .Where(t => t.UserId == userId)
+                .ToListAsync();
+            return Ok(items);
+        }
 
-			var items = await _context.TodoItems
-				.Where(t => t.UserId == userId)
-				.ToListAsync();
-			return Ok(items);
-		}
+        // CREATE
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] TodoApp item)
+        {
+            if (item == null || string.IsNullOrEmpty(item.Title))
+                return BadRequest();
 
-		[HttpPost]
-		public async Task<IActionResult> Create([FromBody] TodoApp item)
-		{
-			if (item == null || string.IsNullOrEmpty(item.Title))
-				return BadRequest();
+            item.UserId = GetUserId();
+            _context.TodoItems.Add(item);
+            await _context.SaveChangesAsync();
+            return Ok(item);
+        }
 
-			item.UserId = GetUserId();
-			Console.WriteLine($"CREATE task for user: {item.UserId}");
+        // TOGGLE done status
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Toggle(int id)
+        {
+            var userId = GetUserId();
+            var item = await _context.TodoItems
+                .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
-			_context.TodoItems.Add(item);
-			await _context.SaveChangesAsync();
-			return Ok(item);
-		}
+            if (item == null) return NotFound();
 
-		[HttpPut("{id}")]
-		public async Task<IActionResult> Toggle(int id)
-		{
-			var userId = GetUserId();
-			var item = await _context.TodoItems
-				.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+            item.IsDone = !item.IsDone;
+            await _context.SaveChangesAsync();
+            return Ok(item);
+        }
 
-			if (item == null) return NotFound();
+        // UPDATE title
+        [HttpPatch("{id}")]
+        public async Task<IActionResult> UpdateTitle(int id, [FromBody] UpdateTitleRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.Title))
+                return BadRequest();
 
-			item.IsDone = !item.IsDone;
-			await _context.SaveChangesAsync();
-			return Ok(item);
-		}
+            var userId = GetUserId();
+            var item = await _context.TodoItems
+                .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
-		[HttpDelete("{id}")]
-		public async Task<IActionResult> Delete(int id)
-		{
-			var userId = GetUserId();
-			var item = await _context.TodoItems
-				.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+            if (item == null) return NotFound();
 
-			if (item == null) return NotFound();
+            item.Title = request.Title;
+            await _context.SaveChangesAsync();
+            return Ok(item);
+        }
 
-			_context.TodoItems.Remove(item);
-			await _context.SaveChangesAsync();
-			return Ok();
-		}
-	}
+        // DELETE
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var userId = GetUserId();
+            var item = await _context.TodoItems
+                .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+
+            if (item == null) return NotFound();
+
+            _context.TodoItems.Remove(item);
+            await _context.SaveChangesAsync();
+            return Ok();
+        }
+    }
+
+    public class UpdateTitleRequest
+    {
+        public string Title { get; set; } = string.Empty;
+    }
 }
