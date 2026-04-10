@@ -25,7 +25,6 @@ namespace WebApplication3.Controllers
                 ?? string.Empty;
         }
 
-        // READ
         [HttpGet]
         public async Task<IActionResult> GetItems()
         {
@@ -36,7 +35,6 @@ namespace WebApplication3.Controllers
             return Ok(items);
         }
 
-        // CREATE
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] TodoApp item)
         {
@@ -64,25 +62,29 @@ namespace WebApplication3.Controllers
             return Ok(item);
         }
 
-        // UPDATE title
+        // UPDATE task fields (title, priority, dueDate)
         [HttpPatch("{id}")]
-        public async Task<IActionResult> UpdateTitle(int id, [FromBody] UpdateTitleRequest request)
+        public async Task<IActionResult> UpdateTask(int id, [FromBody] UpdateTaskRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request?.Title))
-                return BadRequest();
-
             var userId = GetUserId();
             var item = await _context.TodoItems
                 .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
             if (item == null) return NotFound();
 
-            item.Title = request.Title;
+            if (!string.IsNullOrWhiteSpace(request.Title))
+                item.Title = request.Title;
+
+            if (!string.IsNullOrWhiteSpace(request.Priority))
+                item.Priority = request.Priority;
+
+            if (request.UpdateDueDate)
+                item.DueDate = request.DueDate;
+
             await _context.SaveChangesAsync();
             return Ok(item);
         }
 
-        // DELETE
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
@@ -98,8 +100,11 @@ namespace WebApplication3.Controllers
         }
     }
 
-    public class UpdateTitleRequest
+    public class UpdateTaskRequest
     {
-        public string Title { get; set; } = string.Empty;
+        public string? Title { get; set; }
+        public string? Priority { get; set; }
+        public DateTime? DueDate { get; set; }
+        public bool UpdateDueDate { get; set; } = false;
     }
 }
